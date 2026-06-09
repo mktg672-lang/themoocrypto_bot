@@ -1,0 +1,555 @@
+import { useState, useEffect, useCallback, useRef } from "react";
+
+const MOEDAS = [
+  { id: "bitcoin", symbol: "BTC", name: "Bitcoin" },
+  { id: "ethereum", symbol: "ETH", name: "Ethereum" },
+  { id: "solana", symbol: "SOL", name: "Solana" },
+  { id: "binancecoin", symbol: "BNB", name: "BNB" },
+  { id: "ripple", symbol: "XRP", name: "XRP" },
+  { id: "cardano", symbol: "ADA", name: "Cardano" },
+];
+
+const REFRESH_INTERVAL = 30000;
+const MAX_HISTORY = 100;
+
+// ── Indicadores Técnicos ────────────────────────────────────────────────────────
+
+função calcSMA(preços, período) {
+  se (prices.length < period) retorne nulo;
+  retornar preços.slice(-period).reduce((a, b) => a + b, 0) / period;
+}
+
+função calcEMA(preços, período) {
+  se (prices.length < period) retorne nulo;
+  const k = 2 / (período + 1);
+  let ema = prices.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  para (seja i = período; i < preços.comprimento; i++) ema = preços[i] * k + ema * (1 - k);
+  retornar ema;
+}
+
+função calcRSI(preços, período = 14) {
+  se (prices.length < period + 1) retorne nulo;
+  const changes = [];
+  for (let i = 1; i < prices.length; i++) changes.push(prices[i] - prices[i - 1]);
+  const recente = mudanças.slice(-period);
+  const ganhos = recent.filter(c => c > 0).reduce((a, b) => a + b, 0) / período;
+  const perdas = recent.filter(c => c < 0).map(c => Math.abs(c)).reduce((a, b) => a + b, 0) / período;
+  se (perdas === 0) retorne 100;
+  retorno 100 - 100 / (1 + ganhos / perdas);
+}
+
+função calcMACD(preços) {
+  const ema12 = calcEMA(preços, 12);
+  const ema26 = calcEMA(preços, 26);
+  se (!ema12 || !ema26) retorne nulo;
+  retornar ema12 - ema26;
+}
+
+função calcBollinger(preços, período = 20) {
+  se (prices.length < period) retorne nulo;
+  const slice = prices.slice(-period);
+  const sma = slice.reduce((a, b) => a + b, 0) / period;
+  const std = Math.sqrt(slice.reduce((s, p) => s + Math.pow(p - sma, 2), 0) / period);
+  retornar { superior: sma + 2 * std, intermediário: sma, inferior: sma - 2 * std };
+}
+
+função gerarSinal(preços, preçoAtual) {
+  if (prices.length < 14) return { signal: "AGUARDANDO", strength: 0, reasons: [] };
+  const rsi = calcRSI(preços);
+  const macd = calcMACD(preços);
+  const sma20 = calcSMA(prices, 20);
+  const sma50 = calcSMA(prices, 50);
+  const bb = calcBollinger(prices);
+  const ema9 = calcEMA(preços, 9);
+  seja score = 0;
+  const razões = [];
+  se (rsi !== nulo) {
+    if (rsi < 35) { score += 2; reasons.push(`RSI ${rsi.toFixed(1)} — Sobrevendido`); }
+    senão se (rsi > 65) { pontuação -= 2; razões.push(`RSI ${rsi.toFixed(1)} — Sobrecomprado`); }
+    senão reasons.push(`RSI ${rsi.toFixed(1)} — Neutro`);
+  }
+  Se (macd !== null) { se (macd > 0) { pontuação += 1; razões.push("MACD positivo"); } senão { pontuação -= 1; razões.push("MACD negativo"); } }
+  Se (sma20 && sma50) { se (sma20 > sma50) { pontuação += 1; razões.push("SMA20 > SMA50 (Ouro)"); } senão { pontuação -= 1; razões.push("SMA20 < SMA50 (Morte)"); } }
+  if (bb) { if (currentPrice < bb.lower) { score += 2; reasons.push("Abaixo da Banda Inferior"); } else if (currentPrice > bb.upper) { score -= 2; reasons.push("Acima da Banda Superior"); } }
+  if (ema9 && sma20) { if (ema9 > sma20) { score += 1; reasons.push("EMA9 cruzou SMA20 para cima"); } else { score -= 1; reasons.push("EMA9 abaixo da SMA20"); } }
+  const força = Math.min(Math.abs(pontuação) / 7, 1);
+  sinal const = pontuação >= 3? "COMPRA" : pontuação <= -3 ? "VENDA": "NEUTRO";
+  retornar { sinal, força, pontuação, razões, rsi, macd, sma20, bb };
+}
+
+// ── Sparkline ─────────────────────────────────────────────────────────────────
+
+função Sparkline({ preços, sinal }) {
+  Se (!prices || prices.length < 2) retorne nulo;
+  const w = 80, h = 30;
+  const min = Math.min(...preços), max = Math.max(...preços);
+  const range = max - min || 1;
+  const pts = prices.map((p, i) => `${(i / (prices.length - 1)) * w},${h - ((p - min) / range) * h}`).join(" ");
+  const cor = sinal === "COMPRA" ? "#00ff88": sinal === "VENDA" ? "#ff4466" : "#888";
+  retornar (
+    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`}>
+      <polyline fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" points={pts} opacity="0.8" />
+    </svg>
+  );
+}
+
+// ── Distintivo de Sinalização ───────────────────────────────────────────────────────────────
+
+função SignalBadge({ sinal, pequeno }) {
+  const cfg = {
+    COMPRA: { bg: "rgba(0,255,136,0.12)", border: "#00ff88", text: "#00ff88", icon: "▲" },
+    VENDA: { bg: "rgba(255,68,102,0.12)", border: "#ff4466", text: "#ff4466", icon: "▼" },
+    NEUTRO: { bg: "rgba(255,200,50,0.10)", border: "#ffc832", text: "#ffc832", icon: "◆" },
+    AGUARDANDO:{ bg: "rgba(120,120,180,0.10)", border: "#7878b4", text: "#7878b4", icon: "…" },
+  };
+  const c = cfg[signal] || cfg.NEUTRO;
+  retornar (
+    <span style={{
+      display: "inline-flex", alignItems: "center", gap: 4,
+      fundo: c.bg, borda: `1px sólida ${c.border}`, cor: c.texto,
+      borderRadius: 5, padding: small ? "2px 7px" : "3px 10px",
+      Tamanho da fonte: pequeno ? 10 : 11, Peso da fonte: 700, Espaçamento entre letras: 1,2,
+      textTransform: "maiúsculas", fontFamily: "'Space Mono', monoespaçada",
+    }}>
+      <span>{c.icon}</span>{signal}
+    </span>
+  );
+}
+
+// ── Barra de Força ────────────────────────────────────────────────────────────────
+
+função StrengthBar({ força, sinal }) {
+  const cor = sinal === "COMPRA" ? "#00ff88": sinal === "VENDA" ? "#ff4466" : "#ffc832";
+  retornar (
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <div style={{ flex: 1, height: 4, background: "rgba(255,255,255,0.07)", borderRadius: 2, overflow: "hidden" }}>
+        <div style={{ width: `${strength * 100}%`, height: "100%", background: color, borderRadius: 2, transition: "width 0.6s ease" }} />
+      </div>
+      <span style={{ fontSize: 10, color: "#666", fontFamily: "'Space Mono', monospace", minWidth: 30 }}>
+        {(força * 100).toFixed(0)}%
+      </span>
+    </div>
+  );
+}
+
+// ── Cartão de Moedas ──────────────────────────────────────────────────────────────────
+
+função CoinCard({ moeda, dados, selecionado, onClick }) {
+  se (!dados) retorne (
+    <div onClick={onClick} style={cardBase(false)} className="coin-card">
+      <div style={{ color: "#444", fontSize: 12, fontFamily: "'Space Mono', monospace" }}>Carregando {coin.symbol}…</div>
+    </div>
+  );
+  const { preço, mudança24h, preços, dadosSinal } = dados;
+  const { sinal, intensidade } = dadosDoSinal;
+  const isUp = change24h >= 0;
+  retornar (
+    <div onClick={onClick} style={cardBase(selected)} className="coin-card">
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div>
+          <div style={{ fontSize: 11, color: "#555", fontFamily: "'Space Mono', monospace", letterSpacing: 1 }}>{coin.symbol}</div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: "#e8e8e8", fontFamily: "'Bebas Neue', sans-serif", letterSpacing: 1, lineHeight: 1.1 }}>
+            ${price?.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </div>
+          <div style={{ fontSize: 11, color: isUp ? "#00ff88" : "#ff4466", fontFamily: "'Space Mono', monospace", marginTop: 2 }}>
+            {isUp ? "▲" : "▼"} {Math.abs(change24h).toFixed(2)}%
+          </div>
+        </div>
+        <Sparkline prices={prices} signal={signal} />
+      </div>
+      <div style={{ marginTop: 10 }}>
+        <SignalBadge signal={signal} />
+        <div style={{ marginTop: 8 }}><StrengthBar strength={strength} signal={signal} /></div>
+      </div>
+    </div>
+  );
+}
+
+função cardBase(selecionado) {
+  retornar {
+    fundo: selecionado ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.02)",
+    borda: selecionada ? "1px sólida rgba(255,255,255,0.15)" : "1px sólida rgba(255,255,255,0.06)",
+    borderRadius: 12, padding: "14px 16px", cursor: "pointer",
+    transição: "todos os 0,2s de suavização",
+    boxShadow: selecionado ? "0 0 20px rgba(0,0,0,0.4)" : "nenhum",
+  };
+}
+
+// ── Painel de Detalhes ────────────────────────────────────────────────────────────────
+
+função DetailPanel({ moeda, dados }) {
+  se (!dados) retornar nulo;
+  const { preço, variação24h, máxima24h, mínima24h, volume, capitalizaçãodemercado, dadosdesinal } = dados;
+  const { sinal, força, razões, rsi, macd, sma20, bb } = dadosDoSinal;
+  const statStyle = { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid rgba(255,255,255,0.05)" };
+  const labelStyle = { fontSize: 11, color: "#555", fontFamily: "'Space Mono', monospace", letterSpacing: 0.5 };
+  const valueStyle = { fontSize: 12, color: "#ccc", fontFamily: "'Space Mono', monospace" };
+  retornar (
+    <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 14, padding: 20 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
+        <div>
+          <div style={{ fontSize: 13, color: "#888", fontFamily: "'Space Mono', monospace" }}>{coin.name}</div>
+          <div style={{ fontSize: 28, fontWeight: 700, color: "#fff", fontFamily: "'Bebas Neue', sans-serif", letterSpacing: 2 }}>
+            ${price?.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </div>
+        </div>
+        <div style={{ marginLeft: "auto" }}>
+          <SignalBadge signal={signal} />
+          <div style={{ marginTop: 8 }}><StrengthBar strength={strength} signal={signal} /></div>
+        </div>
+      </div>
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ fontSize: 10, color: "#444", fontFamily: "'Space Mono', monospace", letterSpacing: 1.5, marginBottom: 8 }}>MÉTRICAS DE MERCADO</div>
+        {[
+          ["Variação 24h", `${change24h >= 0 ? "+" : ""}${change24h?.toFixed(2)}%`, change24h >= 0 ? "#00ff88": "#ff4466"],
+          ["Máxima 24h", `$${high24h?.toLocaleString("en-US", { maximumFractionDigits: 2 })}`],
+          ["Mínimo 24h", `$${low24h?.toLocaleString("en-US", { máximoFractionDigits: 2 })}`],
+          ["Volume 24h", `$${(volume / 1e6).toFixed(1)}M`],
+          ["Valor de mercado", `$${(marketCap / 1e9).toFixed(2)}B`],
+        ].map(([rótulo, valor, cor]) => (
+          <div key={label} style={statStyle}>
+            <span style={labelStyle}>{label sspan>
+            <span style={{ ...valueStyle, color: color || "#ccc" }}>{value}</span>
+          </div>
+        ))}
+      </div>
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ fontSize: 10, color: "#444", fontFamily: "'Space Mono', monospace", letterSpacing: 1.5, marginBottom: 8 }}>INDICADORES TÉCNICOS</div>
+        {[
+          ["RSI (14)", rsi ? `${rsi.toFixed(1)}${rsi < 35 ? "🟢": rsi> 65? " 🔴" : " 🟡"}` : "—"],
+          ["MACD", macd ? `${macd > 0 ? "+" : ""}${macd.toFixed(4)}` : "—"],
+          ["SMA 20", sma20 ? `$${sma20.toLocaleString("en-US", { maximumFractionDigits: 2 })}` : "—"],
+          ["Bollinger Up", bb ? `$${bb.upper.toLocaleString("en-US", { maximumFractionDigits: 2 })}` : "—"],
+          ["Bollinger Low", bb ? `$${bb.lower.toLocaleString("en-US", { maximumFractionDigits: 2 })}` : "—"],
+        ].map(([rótulo, valor]) => (
+          <div key={label} style={statStyle}>
+            <span style={labelStyle}>{label sspan>
+            <span style={valueStyle}>{valueStyle}>
+          </div>
+        ))}
+      </div>
+      <div>
+        <div style={{ fontSize: 10, color: "#444", fontFamily: "'Space Mono', monospace", letterSpacing: 1.5, marginBottom: 8 }}>MOTIVOS DO SINAL</div>
+        {reasons.map((r, i) => (
+          <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0", borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
+            <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#444", flexShrink: 0 }} />
+            <span style={{ fontSize: 11, color: "#888", fontFamily: "'Space Mono', monospace" }}>{r}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Painel de Histórico ───────────────────────────────────────────────────────────────
+
+function HistoryPanel({ history, onClear }) {
+  const [filter, setFilter] = useState("TODOS");
+  const filtros = ["TODOS", "COMPRA", "VENDA", "NEUTRO"];
+
+  const filtered = filter === "TODOS" ? history : history.filter(h => h.signal === filter);
+
+  se (history.length === 0) retorne (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: 200, gap: 12 }}>
+      <div style={{ fontSize: 28, opacity: 0.2 }}>📋</div>
+      <div style={{ fontSize: 11, color: "#444", fontFamily: "'Space Mono', monospace", textAlign: "center", lineHeight: 1.8 }}>
+        Nenhum sinal registrado ainda.<br />Os sinais que aparecem aqui<br />conforme foram gerados.
+      </div>
+    </div>
+  );
+
+  const counts = history.reduce((acc, h) => { acc[h.signal] = (acc[h.signal] || 0) + 1; return acc; }, {});
+
+  retornar (
+    <div>
+      {/* Linha de estatísticas */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 14 }}>
+        {[["COMPRA", "#00ff88"], ["VENDA", "#ff4466"], ["NEUTRO", "#ffc832"]].map(([s, c]) => (
+          <div key={s} style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)", borderRadius: 8, padding: "8px 6px", textAlign: "center" }}>
+            <div style={{ fontSize: 18, fontFamily: "'Bebas Neue', sans-serif", color: c, letterSpacing: 1 }}>{counts[s] || 0}</div>
+            <div style={{ fontSize: 9, color: "#444", fontFamily: "'Space Mono', monospace", letterSpacing: 1 }}>{s}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Abas de filtro */}
+      <div style={{ display: "flex", gap: 4, marginBottom: 12 }}>
+        {filters.map(f => (
+          <button key={f} onClick={() => setFilter(f)} style={{
+            flex: 1, padding: "4px 0", fontSize: 9, fontFamily: "'Space Mono', monospace",
+            fundo: filtro === f ? "rgba(255,255,255,0.08)" : "transparente",
+            borda: `1px sólida ${filtro === f ? "rgba(255,255,255,0.15)" : "rgba(255,255,255,0.05)"}`,
+            cor: filtro === f ? "#ccc" : "#444", raioDaBorda: 5, cursor: "ponteiro", espaçamentoEntreLetras: 0,5,
+          }}>{f}</button>
+        ))}
+      </div>
+
+      {/* Entradas */}
+      <div style={{ display: "grid", gap: 6, maxHeight: 340, overflowY: "auto" }}>
+        {filtered.length === 0 ? (
+          <div style={{ fontSize: 11, color: "#444", fontFamily: "'Space Mono', monospace", textAlign: "center", padding: "20px 0" }}>
+            Nenhum sinal do tipo "{filter}"
+          </div>
+        ) : filtered.map((entry, i) => (
+          <div key={i} style={{
+            display: "flex", alignItems: "center", gap: 10, padding: "9px 12px",
+            fundo: "rgba(255,255,255,0.02)", borda: "1px sólida rgba(255,255,255,0.05)",
+            borderRadius: 8, animation: i === 0 ? "fadeIn 0.3s ease" : "none",
+          }}>
+            <SignalBadge signal={entry.signal} pequeno />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 11, color: "#ccc", fontFamily: "'Space Mono', monospace", fontWeight: 700 }}>{entry.symbol}</div>
+              <div style={{ fontSize: 10, color: "#555", fontFamily: "'Space Mono', monospace" }}>
+                ${entry.price?.toLocaleString("en-US", { maximumFractionDigits: 2 })}
+              </div>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontSize: 9, color: "#444", fontFamily: "'Space Mono', monospace" }}>{entry.time}</div>
+              <div style={{ fontSize: 10, color: entry.signal === "COMPRA" ? "#00ff88" : entry.signal === "VENDA" ? "#ff4466" : "#ffc832", fontFamily: "'Space Mono', monospace" }}>
+                {Math.round(entry.strength * 100)}%
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {history.length > 0 && (
+        <button onClick={onClear} style={{
+          largura: "100%", margem superior: 12, preenchimento: "7px 0", tamanho da fonte: 10,
+          fontFamily: "'Space Mono', monospace", background: "transparent",
+          borda: "1px sólida rgba(255,68,68,0.15)", cor: "#633", raio da borda: 6,
+          cursor: "ponteiro", espaçamento entre letras: 1,
+        }}>
+          🗑 LIMPAR HISTÓRICO
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ── Aplicativo Principal ───────────────────────────────────────────────────────────────────
+
+export default function CryptoSignalBot() {
+  const [marketData, setMarketData] = useState({});
+  const [priceHistory, setPriceHistory] = useState({});
+  const [signalHistory, setSignalHistory] = useState([]);
+  const [lastSignals, setLastSignals] = useState({});
+  const [selectedCoin, setSelectedCoin] = useState(COINS[0]);
+  const [loading, setLoading] = useState(true);
+  const [lastUpdate, setLastUpdate] = useState(null);
+  const [contagem regressiva, definirContagemRegressiva] = useState(REFRESH_INTERVAL / 1000);
+  const [erro, setError] = useState(null);
+  const [rightTab, setRightTab] = useState("detalhes"); // "detalhes" | "histórico"
+  const intervalRef = useRef(null);
+  const countdownRef = useRef(null);
+  const lastSignalsRef = useRef({});
+
+  // Carregar histórico do armazenamento ao montar
+  useEffect(() => {
+    (async () => {
+      tentar {
+        const saved = await window.storage.get("signal-history");
+        se (saved?.value) setSignalHistory(JSON.parse(saved.value));
+      } pegar (_) {}
+    })();
+  }, []);
+
+  const fetchData = useCallback(async () => {
+    tentar {
+      setError(null);
+      const ids = COINS.map(c => c.id).join(",");
+      const res = await fetch(
+        `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${ids}&order=market_cap_desc&sparkline=false&price_change_percentage=24h`
+      );
+      if (!res.ok) throw new Error("Erro de API");
+      const json = await res.json();
+
+      const newData = {};
+      const novasEntradas = [];
+
+      json.forEach(coin => {
+        const histórico = históricoDePreços[coin.id] || [];
+        const atualizado = [...history, coin.current_price].slice(-50);
+        const signalData = generateSignal(updated, coin.current_price);
+
+        newData[coin.id] = {
+          preço: preço_atual_da_moeda,
+          mudança24h: moeda.price_change_percentage_24h,
+          alta24h: moeda.alta_24h,
+          low24h: moeda.low_24h,
+          volume: moeda.volume_total,
+          Capitalização de mercado: coin.market_cap,
+          Preços: atualizados,
+          dados do sinal,
+        };
+
+        setPriceHistory(prev => ({ ...prev, [coin.id]: updated }));
+
+        // Rastrear alterações de sinal — gravar somente se o sinal mudar ou for a primeira vez
+        const prevSignal = lastSignalsRef.current[coin.id];
+        if (signalData.signal !== "AGUARDANDO" && signalData.signal !== prevSignal) {
+          lastSignalsRef.current[coin.id] = signalData.signal;
+          novasEntradas.push({
+            símbolo: coin.symbol.toUpperCase(),
+            coinId: coin.id,
+            sinal: dadosDoSinal.sinal,
+            força: signalData.strength,
+            preço: preço_atual_da_moeda,
+            hora: new Date().toLocaleTimeString("pt-BR", { hora: "2 dígitos", minuto: "2 dígitos" }),
+            data: new Date().toLocaleDateString("pt-BR"),
+            ts: Date.now(),
+          });
+        }
+      });
+
+      se (newEntries.length > 0) {
+        setSignalHistory(prev => {
+          const atualizado = [...novasEntradas, ...anterior].slice(0, HISTÓRICO_MÁXIMO);
+          window.storage.set("signal-history", JSON.stringify(updated)).catch(() => {});
+          retornar atualizado;
+        });
+      }
+
+      definirDadosDeMercado(novosDados);
+      definirÚltimaAtualização(novo Date());
+      definirCarregando(falso);
+      setCountdown(REFRESH_INTERVAL / 1000);
+    } catch (e) {
+      setError("Erro ao buscar dados. Tentando novamente...");
+      definirCarregando(falso);
+    }
+  }, [priceHistory]);
+
+  useEffect(() => {
+    buscarDados();
+    intervalRef.current = setInterval(fetchData, REFRESH_INTERVAL);
+    countdownRef.current = setInterval(() => {
+      setCountdown(c => c <= 1 ? REFRESH_INTERVAL / 1000 : c - 1);
+    }, 1000);
+    return () => { clearInterval(intervalRef.current); clearInterval(countdownRef.current); };
+  }, []);
+
+  const clearHistory = async () => {
+    setSignalHistory([]);
+    tente { aguarde window.storage.delete("signal-history"); } catch (_) {}
+  };
+
+  const signalCounts = Object.values(marketData).reduce(
+    (acc, d) => { if (d?.signalData?.signal) acc[d.signalData.signal] = (acc[d.signalData.signal] || 0) + 1; return acc; },
+    {}
+  );
+
+  retornar (
+    <div style={{ minHeight: "100vh", background: "#0a0a0f", color: "#e8e8e8", fontFamily: "'Space Mono', monospace" }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Space+Mono:wght@400;700&display=swap');
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        .coin-card:hover { background: rgba(255,255,255,0.04) !important; transform: translateY(-1px); }
+        ::-webkit-scrollbar { width: 4px; } ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #222; border-radius: 4px; }
+        @keyframes pulso { 0%,100% { opacidade:1 } 50% { opacidade:0.4 } }
+        @keyframes fadeIn { from { opacity:0; transform:translateY(6px) } to { opacity:1; transform:translateY(0) } }
+        .fade-in { animação: fadeIn 0.4s ease forwards; }
+        .tab-btn:hover { color: #aaa !important; }
+      ` estilo de cerveja>
+
+      {/* Cabeçalho */}
+      <div style={{ borderBottom: "1px solid rgba(255,255,255,0.06)", padding: "16px 24px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ width: 8, height: 8, borderRadius: "50%", background: error ? "#ff4466" : "#00ff88", animation: "pulse 2s infinite" }} />
+          <span style={{ fontWeight: 700, letterSpacing: 3, color: "#fff", fontFamily: "'Bebas Neue', sans-serif", fontSize: 20 }}>BOT DE SINALIZAÇÃO CRIPTOGRÁFICA</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 16, fontSize: 10, color: "#444" }}>
+          {lastUpdate && <span>Atualizado: {lastUpdate.toLocaleTimeString("pt-BR")}</span>}
+          <div style={{ width: 28, height: 28, borderRadius: "50%", border: "2px solid rgba(255,255,255,0.1)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "#666", position: "relative" }}>
+            <svg style={{ position: "absolute", top: 0, left: 0, transform: "rotate(-90deg)" }} width="28" height="28">
+              <circle cx="14" cy="14" r="12" fill="none" stroke="#00ff88" strokeWidth="2"
+                strokeDasharray={`${(1 - contagem regressiva / (REFRESH_INTERVAL / 1000)) * 75.4} 75.4`}
+                style={{ transition: "stroke-dasharray 1s linear" }} />
+            </svg>
+            <span style={{ zIndex: 1 }}>{contagem regressiva}</span>
+          </div>
+          <button onClick={fetchData} style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", color: "#888", borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontSize: 10, letterSpacing: 1 }}>
+            ↻ ATUALIZAR
+          </button>
+        </div>
+      </div>
+
+      {/* Barra de Resumo */}
+      {!carregando && (
+        <div style={{ padding: "10px 24px", borderBottom: "1px solid rgba(255,255,255,0.04)", display: "flex", gap: 20, fontSize: 10, alignItems: "center" }}>
+          {[["COMPRA", "#00ff88"], ["VENDA", "#ff4466"], ["NEUTRO", "#ffc832"]].map(([s, c]) => (
+            <div key={s} style={{ display: "flex", alignItems: "center", gap: 6, color: "#555" }}>
+              <span style={{ color: c, fontWeight: 700 }}>{signalCounts[s] || 0}</span>
+              <span style={{ letterSpacing: 1 }}>{s}</span>
+            </div>
+          ))}
+          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6, color: "#444" }}>
+            <span style={{ color: "#555" }}>{signalHistory.length}</span>
+            <span style={{ letterSpacing: 1 }}>SINAIS NO HISTÓRICO</span>
+          </div>
+          {erro && <span style={{ color: "#ff4466" }}>{erro}</span>}
+        </div>
+      )}
+
+      {/* Conteúdo Principal */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 0, height: "calc(100vh - 105px)" }}>
+
+        {/* Grade de Moedas */}
+        <div style={{ padding: 20, overflowY: "auto" }}>
+          {carregando ? (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 200, color: "#333", fontSize: 11, letterSpacing: 2 }}>
+              CARREGANDO DADOS...
+            </div>
+          ) : (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 10 }}>
+              {MOEDAS.map(moeda => (
+                <div key={coin.id} className="fade-in">
+                  <CoinCard
+                    moeda={moeda}
+                    dados={marketData[coin.id]}
+                    selecionado={selectedCoin.id === coin.id}
+                    onClick={() => { setSelectedCoin(moeda); setRightTab("detalhes"); }}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+          <div style={{ marginTop: 24, padding: 12, background: "rgba(255,200,50,0.04)", border: "1px solid rgba(255,200,50,0.1)", borderRadius: 8, fontSize: 10, color: "#554", lineHeight: 1.6 }}>
+            ⚠ AVISO: Sinais gerados por análise técnica. Não é recomendação de investimento. Use a gestão de risco adequada.
+          </div>
+        </div>
+
+        {/* Painel Direito */}
+        <div style={{ borderLeft: "1px solid rgba(255,255,255,0.05)", display: "flex", flexDirection: "column" }}>
+
+          {/* Abas */}
+          <div style={{ display: "flex", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+            {[["detalhes", "DETALHES"], ["histórico", `HISTÓRICO ${signalHistory.length > 0 ? `(${signalHistory.length})` : ""}`]].map(([chave, rótulo]) => (
+              <button key={key} className="tab-btn" onClick={() => setRightTab(key)} style={{
+                flex: 1, padding: "12px 8px", fontSize: 10, fontFamily: "'Space Mono', monospace",
+                fundo: "transparente", borda: "nenhuma", cursor: "ponteiro", espaçamento entre letras: 1,
+                cor: tabulaçãoDireita === tecla ? "#fff" : "#444",
+                borderBottom: rightTab === key ? "2px solid #00ff88" : "2px solid transparent",
+                transição: "todos os 0,15s",
+              }}>{rótulo}</button>
+            ))}
+          </div>
+
+          {/* Conteúdo da guia */}
+          <div style={{ flex: 1, padding: 16, overflowY: "auto" }}>
+            {rightTab === "detalhes" ? (
+              selectedCoin && marketData[selectedCoin.id] ? (
+                <DetailPanel coin={selectedCoin} data={marketData[selectedCoin.id]} />
+              ) : (
+                <div style={{ color: "#333", fontSize: 11, marginTop: 20, textAlign: "center" }}>Selecione uma moeda</div>
+              )
+            ) : (
+              <HistoryPanel history={signalHistory} onClear={clearHistory} />
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
